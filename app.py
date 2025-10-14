@@ -23,7 +23,7 @@ generation_config = {
 }
 
 model = genai.GenerativeModel(
-    model_name='gemini-1.5-flash-latest',
+    model_name='gemini-1.5-flash',
     generation_config=generation_config,
 )
 
@@ -169,7 +169,7 @@ def analyze_resumes():
 
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({"status": "healthy", "model": "gemini-1.5-flash-latest"}), 200
+    return jsonify({"status": "healthy", "model": "gemini-1.5-flash"}), 200
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
