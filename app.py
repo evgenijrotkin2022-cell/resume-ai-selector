@@ -7,6 +7,7 @@ import io
 import os
 import json
 import traceback
+import requests  # <--- добавлено для OpenRouter
 
 # -----------------------------
 # Flask initialization
@@ -15,12 +16,19 @@ app = Flask(__name__)
 CORS(app)
 
 # -----------------------------
-# Gemini API Configuration
+# API Configuration
 # -----------------------------
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+
 if not GEMINI_API_KEY:
     print("⚠️  WARNING: GEMINI_API_KEY not found in environment variables")
-genai.configure(api_key=GEMINI_API_KEY)
+if not OPENROUTER_API_KEY:
+    print("⚠️  WARNING: OPENROUTER_API_KEY not found in environment variables")
+
+# Настройка Gemini
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 # -----------------------------
 # Model selection (Gemini 2.5 — актуально для 2025)
@@ -54,6 +62,30 @@ if model is None:
     active_model_name = "not initialized"
 
 # -----------------------------
+# OpenRouter fallback
+# -----------------------------
+def ask_openrouter(prompt):
+    """Если Gemini не работает — пробуем OpenRouter"""
+    if not OPENROUTER_API_KEY:
+        return "❌ Нет OpenRouter API ключа!"
+    try:
+        headers = {
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        data = {
+            "model": "google/gemini-2.0-flash-thinking-exp",  # можно заменить на "openai/gpt-4o-mini"
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
+        if r.status_code == 200:
+            return r.json()["choices"][0]["message"]["content"]
+        else:
+            return f"Ошибка OpenRouter: {r.status_code} - {r.text}"
+    except Exception as e:
+        return f"Ошибка при обращении к OpenRouter: {str(e)}"
+
+# -----------------------------
 # File parsing helpers
 # -----------------------------
 def extract_text_from_pdf(file_content):
@@ -80,23 +112,11 @@ def home():
     return jsonify({
         "status": "ok",
         "message": "Resume Analyzer API is running!",
-        "version": "5.2",
+        "version": "5.3",
         "model": active_model_name,
-        "api_key_set": "Yes" if GEMINI_API_KEY else "No"
+        "api_key_set": "Yes" if GEMINI_API_KEY else "No",
+        "openrouter_set": "Yes" if OPENROUTER_API_KEY else "No"
     })
-
-@app.route("/test-models", methods=["GET"])
-def test_models():
-    """Check which Gemini models are available"""
-    results = {}
-    for name in MODELS_TO_TRY:
-        try:
-            test_model = genai.GenerativeModel(name)
-            r = test_model.generate_content("Test")
-            results[name] = "✅ Working"
-        except Exception as e:
-            results[name] = f"❌ {str(e)[:120]}"
-    return jsonify(results)
 
 @app.route("/analyze", methods=["POST"])
 def analyze_resumes():
@@ -106,8 +126,6 @@ def analyze_resumes():
         if model is None:
             print("Model not initialized, retrying...")
             model, active_model_name = get_working_model()
-            if model is None:
-                return jsonify({"error": "Не удалось инициализировать AI модель. Проверьте API ключ."}), 500
 
         files = request.files.getlist("resumes")
         criteria = request.form.get("criteria", "")
@@ -145,7 +163,7 @@ def analyze_resumes():
             resumes_data = resumes_data[:10]
             print("⚠️ Limited to 10 resumes for stability")
 
-        # Prompt for Gemini
+        # Prompt
         prompt = f"""Ты — эксперт HR. Проанализируй резюме и выбери ТОП-5 кандидатов.
 
 Критерии отбора: {criteria if criteria else "Квалификация, опыт, образование"}.
@@ -174,9 +192,12 @@ def analyze_resumes():
 """
 
         print(f"🤖 Sending to Gemini ({active_model_name})...")
-        response = model.generate_content(prompt)
-        result_text = response.text.strip()
-        print(f"✅ Received response ({len(result_text)} chars)")
+        try:
+            response = model.generate_content(prompt)
+            result_text = response.text.strip()
+        except Exception as e:
+            print(f"⚠️ Gemini error, fallback to OpenRouter: {str(e)}")
+            result_text = ask_openrouter(prompt)
 
         # Cleanup markdown fences
         for prefix in ["```json", "```"]:
@@ -189,7 +210,6 @@ def analyze_resumes():
         try:
             result = json.loads(result_text)
             result["top_candidates"] = result.get("top_candidates", [])[:5]
-            print(f"🎯 Parsed {len(result['top_candidates'])} candidates successfully")
             return jsonify(result)
         except json.JSONDecodeError:
             return jsonify({
@@ -216,3 +236,4 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     print(f"🌐 Starting server on port {port} (model: {active_model_name})")
     app.run(host="0.0.0.0", port=port, debug=False)
+
