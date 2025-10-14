@@ -10,11 +10,9 @@ import json
 app = Flask(__name__)
 CORS(app)
 
-# Настройка Gemini API
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', 'AIzaSyBrblYdHmCrrxLu3atlu1uhxvUvj8e9buM')
 genai.configure(api_key=GEMINI_API_KEY)
 
-# ИСПРАВЛЕНО: Используем правильную конфигурацию
 generation_config = {
     "temperature": 0.7,
     "top_p": 0.95,
@@ -28,7 +26,6 @@ model = genai.GenerativeModel(
 )
 
 def extract_text_from_pdf(file_content):
-    """Извлекает текст из PDF"""
     try:
         pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_content))
         text = ""
@@ -40,7 +37,6 @@ def extract_text_from_pdf(file_content):
         return ""
 
 def extract_text_from_docx(file_content):
-    """Извлекает текст из DOCX"""
     try:
         doc = docx.Document(io.BytesIO(file_content))
         text = "\n".join([para.text for para in doc.paragraphs])
@@ -54,8 +50,8 @@ def home():
     return jsonify({
         "status": "ok",
         "message": "Resume Analyzer API работает!",
-        "version": "3.0",
-        "model": "gemini-1.5-flash-latest"
+        "version": "4.0",
+        "model": "gemini-1.5-flash"
     })
 
 @app.route('/analyze', methods=['POST'])
@@ -69,13 +65,11 @@ def analyze_resumes():
         
         print(f"Received {len(files)} files for analysis")
         
-        # Извлекаем текст из всех резюме
         resumes_data = []
         for idx, file in enumerate(files):
             filename = file.filename
             file_content = file.read()
             
-            # Определяем тип файла и извлекаем текст
             text = ""
             if filename.lower().endswith('.pdf'):
                 text = extract_text_from_pdf(file_content)
@@ -88,14 +82,13 @@ def analyze_resumes():
                 resumes_data.append({
                     "id": idx + 1,
                     "filename": filename,
-                    "text": text[:6000]  # Ограничиваем длину
+                    "text": text[:6000]
                 })
                 print(f"Processed file {idx + 1}: {filename} ({len(text)} chars)")
         
         if not resumes_data:
             return jsonify({"error": "Не удалось извлечь текст из файлов"}), 400
         
-        # Формируем промт для Gemini
         prompt = f"""Ты - эксперт HR. Проанализируй резюме и выбери ТОП-5 лучших кандидатов.
 
 КРИТЕРИИ: {criteria if criteria else "Общая квалификация, опыт, образование, навыки"}
@@ -107,7 +100,7 @@ def analyze_resumes():
             prompt += f"\n[РЕЗЮМЕ {resume['id']}] Файл: {resume['filename']}\n{resume['text']}\n---\n"
         
         prompt += """
-Ответь ТОЛЬКО в формате JSON (без ```json и без комментариев):
+Ответь ТОЛЬКО в формате JSON (без markdown):
 {
   "top_candidates": [
     {
@@ -126,16 +119,14 @@ def analyze_resumes():
         
         print("Sending request to Gemini API...")
         
-        # Отправляем запрос в Gemini с обработкой ошибок
         try:
             response = model.generate_content(prompt)
             result_text = response.text
-            print(f"Received response from Gemini: {len(result_text)} chars")
+            print(f"Received response: {len(result_text)} chars")
         except Exception as api_error:
             print(f"Gemini API error: {str(api_error)}")
             return jsonify({"error": f"Ошибка Gemini API: {str(api_error)}"}), 500
         
-        # Очищаем ответ от markdown
         result_text = result_text.strip()
         if result_text.startswith('```json'):
             result_text = result_text[7:]
@@ -147,22 +138,19 @@ def analyze_resumes():
         
         try:
             result = json.loads(result_text)
-            # Ограничиваем до топ-5
             if 'top_candidates' in result and len(result['top_candidates']) > 5:
                 result['top_candidates'] = result['top_candidates'][:5]
-            print(f"Successfully parsed JSON with {len(result.get('top_candidates', []))} candidates")
+            print(f"Success! Found {len(result.get('top_candidates', []))} candidates")
             return jsonify(result)
         except json.JSONDecodeError as e:
             print(f"JSON decode error: {e}")
-            print(f"Raw response: {result_text[:500]}")
-            # Возвращаем как текст
             return jsonify({
                 "raw_response": result_text,
                 "note": "Ответ в текстовом формате"
             })
     
     except Exception as e:
-        print(f"Error in analyze_resumes: {str(e)}")
+        print(f"Error: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": f"Ошибка сервера: {str(e)}"}), 500
