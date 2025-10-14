@@ -1,6 +1,7 @@
-Flask
+flask
 flask-cors
-google-generativeai>=0.8.0
+google-generativeai
 PyPDF2
 python-docx
 gunicorn
+
