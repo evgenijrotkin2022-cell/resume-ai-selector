@@ -14,8 +14,18 @@ CORS(app)
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', 'AIzaSyBrblYdHmCrrxLu3atlu1uhxvUvj8e9buM')
 genai.configure(api_key=GEMINI_API_KEY)
 
-# ИСПРАВЛЕНО: Используем новое название модели
-model = genai.GenerativeModel('gemini-1.5-flash')
+# ИСПРАВЛЕНО: Используем правильную конфигурацию
+generation_config = {
+    "temperature": 0.7,
+    "top_p": 0.95,
+    "top_k": 64,
+    "max_output_tokens": 8192,
+}
+
+model = genai.GenerativeModel(
+    model_name='gemini-1.5-flash-latest',
+    generation_config=generation_config,
+)
 
 def extract_text_from_pdf(file_content):
     """Извлекает текст из PDF"""
@@ -44,7 +54,8 @@ def home():
     return jsonify({
         "status": "ok",
         "message": "Resume Analyzer API работает!",
-        "version": "2.0"
+        "version": "3.0",
+        "model": "gemini-1.5-flash-latest"
     })
 
 @app.route('/analyze', methods=['POST'])
@@ -55,6 +66,8 @@ def analyze_resumes():
         
         if not files:
             return jsonify({"error": "Файлы не загружены"}), 400
+        
+        print(f"Received {len(files)} files for analysis")
         
         # Извлекаем текст из всех резюме
         resumes_data = []
@@ -75,57 +88,58 @@ def analyze_resumes():
                 resumes_data.append({
                     "id": idx + 1,
                     "filename": filename,
-                    "text": text[:8000]  # Ограничиваем длину
+                    "text": text[:6000]  # Ограничиваем длину
                 })
+                print(f"Processed file {idx + 1}: {filename} ({len(text)} chars)")
         
         if not resumes_data:
             return jsonify({"error": "Не удалось извлечь текст из файлов"}), 400
         
         # Формируем промт для Gemini
-        prompt = f"""
-Ты - эксперт по подбору персонала. Проанализируй следующие резюме и выбери ТОП-5 лучших кандидатов.
+        prompt = f"""Ты - эксперт HR. Проанализируй резюме и выбери ТОП-5 лучших кандидатов.
 
-Критерии отбора: {criteria if criteria else "Общая квалификация, опыт работы, образование, навыки"}
+КРИТЕРИИ: {criteria if criteria else "Общая квалификация, опыт, образование, навыки"}
 
-Резюме:
+РЕЗЮМЕ:
 """
         
         for resume in resumes_data:
-            prompt += f"\n\n--- РЕЗЮМЕ #{resume['id']} (Файл: {resume['filename']}) ---\n{resume['text']}\n"
+            prompt += f"\n[РЕЗЮМЕ {resume['id']}] Файл: {resume['filename']}\n{resume['text']}\n---\n"
         
         prompt += """
-
-Ответь СТРОГО в формате JSON (без markdown, без комментариев):
+Ответь ТОЛЬКО в формате JSON (без ```json и без комментариев):
 {
   "top_candidates": [
     {
       "rank": 1,
       "resume_id": 1,
-      "filename": "имя файла",
+      "filename": "имя_файла",
       "score": 95,
-      "strengths": ["сильная сторона 1", "сильная сторона 2"],
-      "reasons": "Краткое объяснение почему этот кандидат в топе",
-      "key_skills": ["навык 1", "навык 2"]
+      "strengths": ["сильная сторона 1", "сильная сторона 2", "сильная сторона 3"],
+      "reasons": "Почему этот кандидат лучший (2-3 предложения)",
+      "key_skills": ["навык1", "навык2", "навык3"]
     }
   ],
-  "summary": "Общее резюме по топ кандидатам"
+  "summary": "Краткое резюме по всем топ кандидатам"
 }
-
-Верни ТОЛЬКО валидный JSON, ничего больше.
 """
         
-        # Отправляем запрос в Gemini
-        print(f"Sending request to Gemini with {len(resumes_data)} resumes")
-        response = model.generate_content(prompt)
-        result_text = response.text
+        print("Sending request to Gemini API...")
         
-        print(f"Gemini response: {result_text[:200]}...")
+        # Отправляем запрос в Gemini с обработкой ошибок
+        try:
+            response = model.generate_content(prompt)
+            result_text = response.text
+            print(f"Received response from Gemini: {len(result_text)} chars")
+        except Exception as api_error:
+            print(f"Gemini API error: {str(api_error)}")
+            return jsonify({"error": f"Ошибка Gemini API: {str(api_error)}"}), 500
         
         # Очищаем ответ от markdown
         result_text = result_text.strip()
         if result_text.startswith('```json'):
             result_text = result_text[7:]
-        if result_text.startswith('```'):
+        elif result_text.startswith('```'):
             result_text = result_text[3:]
         if result_text.endswith('```'):
             result_text = result_text[:-3]
@@ -136,24 +150,28 @@ def analyze_resumes():
             # Ограничиваем до топ-5
             if 'top_candidates' in result and len(result['top_candidates']) > 5:
                 result['top_candidates'] = result['top_candidates'][:5]
+            print(f"Successfully parsed JSON with {len(result.get('top_candidates', []))} candidates")
             return jsonify(result)
         except json.JSONDecodeError as e:
             print(f"JSON decode error: {e}")
-            print(f"Raw response: {result_text}")
-            # Возвращаем как текст, если не удалось распарсить
+            print(f"Raw response: {result_text[:500]}")
+            # Возвращаем как текст
             return jsonify({
                 "raw_response": result_text,
-                "note": "Ответ в текстовом формате (не удалось распарсить JSON)"
+                "note": "Ответ в текстовом формате"
             })
     
     except Exception as e:
         print(f"Error in analyze_resumes: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Ошибка сервера: {str(e)}"}), 500
 
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({"status": "healthy"}), 200
+    return jsonify({"status": "healthy", "model": "gemini-1.5-flash-latest"}), 200
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
+    print(f"Starting server on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
