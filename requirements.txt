@@ -1,6 +1,5 @@
-flask==3.0.0
-flask-cors==4.0.0
-google-generativeai==0.8.3
-PyPDF2==3.0.1
-python-docx==1.1.0
-gunicorn==21.2.0
+Flask
+flask-cors
+google-generativeai>=0.8.0
+PyPDF2
+python-docx
