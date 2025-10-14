@@ -23,13 +23,13 @@ if not GEMINI_API_KEY:
 genai.configure(api_key=GEMINI_API_KEY)
 
 # -----------------------------
-# Model selection (updated for Oct 2025)
+# Model selection (Gemini 2.5 — актуально для 2025)
 # -----------------------------
 MODELS_TO_TRY = [
-    "models/gemini-1.5-pro-latest",
-    "models/gemini-1.5-flash-latest",
-    "models/gemini-1.5-pro",
-    "models/gemini-1.5-flash",
+    "models/gemini-2.5-pro",
+    "models/gemini-2.5-flash",
+    "models/gemini-2.5-pro-preview-06-05",
+    "models/gemini-2.5-flash-preview-09-2025",
 ]
 
 def get_working_model():
@@ -38,8 +38,7 @@ def get_working_model():
         try:
             print(f"🔍 Trying model: {model_name}")
             model = genai.GenerativeModel(model_name)
-            # Simple test query
-            response = model.generate_content("Hello, Gemini!")
+            response = model.generate_content("Hello, Gemini 2.5!")
             if response and response.text:
                 print(f"✅ Model initialized successfully: {model_name}")
                 return model, model_name
@@ -60,10 +59,7 @@ if model is None:
 def extract_text_from_pdf(file_content):
     try:
         pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_content))
-        text = ""
-        for page in pdf_reader.pages:
-            text += page.extract_text() or ""
-        return text
+        return "".join(page.extract_text() or "" for page in pdf_reader.pages)
     except Exception as e:
         print(f"Error extracting PDF: {e}")
         return ""
@@ -71,8 +67,7 @@ def extract_text_from_pdf(file_content):
 def extract_text_from_docx(file_content):
     try:
         doc = docx.Document(io.BytesIO(file_content))
-        text = "\n".join([p.text for p in doc.paragraphs])
-        return text
+        return "\n".join(p.text for p in doc.paragraphs)
     except Exception as e:
         print(f"Error extracting DOCX: {e}")
         return ""
@@ -85,7 +80,7 @@ def home():
     return jsonify({
         "status": "ok",
         "message": "Resume Analyzer API is running!",
-        "version": "5.1",
+        "version": "5.2",
         "model": active_model_name,
         "api_key_set": "Yes" if GEMINI_API_KEY else "No"
     })
@@ -125,15 +120,15 @@ def analyze_resumes():
         resumes_data = []
         for idx, file in enumerate(files):
             filename = file.filename
-            file_content = file.read()
+            content = file.read()
             text = ""
 
             if filename.lower().endswith(".pdf"):
-                text = extract_text_from_pdf(file_content)
+                text = extract_text_from_pdf(content)
             elif filename.lower().endswith(".docx"):
-                text = extract_text_from_docx(file_content)
+                text = extract_text_from_docx(content)
             elif filename.lower().endswith(".txt"):
-                text = file_content.decode("utf-8", errors="ignore")
+                text = content.decode("utf-8", errors="ignore")
 
             if text.strip():
                 resumes_data.append({
@@ -183,7 +178,7 @@ def analyze_resumes():
         result_text = response.text.strip()
         print(f"✅ Received response ({len(result_text)} chars)")
 
-        # Cleanup possible markdown fences
+        # Cleanup markdown fences
         for prefix in ["```json", "```"]:
             if result_text.startswith(prefix):
                 result_text = result_text[len(prefix):]
