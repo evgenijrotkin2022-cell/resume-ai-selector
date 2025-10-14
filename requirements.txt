@@ -3,3 +3,4 @@ flask-cors
 google-generativeai>=0.8.0
 PyPDF2
 python-docx
+gunicorn
