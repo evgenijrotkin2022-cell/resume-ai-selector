@@ -138,13 +138,3 @@ def health():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
-```
-
-**Файл 2: `requirements.txt`** (зависимости Python)
-```
-flask==3.0.0
-flask-cors==4.0.0
-google-generativeai==0.3.2
-PyPDF2==3.0.1
-python-docx==1.1.0
-gunicorn==21.2.0
